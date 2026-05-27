@@ -1,6 +1,6 @@
 # MoralSteer
 
-Official code for the paper *"MoralSteer: Safety Preserving Fidelity Gains in Morally Complex Role-Playing via Theory-Guided On-Policy Self-Distillation"*.
+Code for the paper *"MoralSteer: Safety Preserving Fidelity Gains in Morally Complex Role-Playing via Theory-Guided On-Policy Self-Distillation"*.
 
 ## Overview
 
