@@ -1,0 +1,55 @@
+## Accelerate config for 8×H200 FSDP (ZeRO-3 equivalent).
+##
+## Usage on the cluster:
+##   accelerate launch --config_file training/configs/accelerate_fsdp.yaml \
+##       -m training.train_opd --config training/configs/opd_stage1.yaml ...
+##
+## Notes:
+##   - distributed_type FSDP with FULL_SHARD is the PyTorch-native equivalent of
+##     DeepSpeed ZeRO-3 (params + grads + optimizer states all sharded across ranks).
+##   - transformer_layer_cls_to_wrap is set for Qwen3.5; if you swap to LLaMA-3
+##     change it to "LlamaDecoderLayer", for Qwen2.5 to "Qwen2DecoderLayer".
+##   - mixed_precision: bf16 — matches all stage yaml `bf16: true`.
+##   - fsdp_state_dict_type: SHARDED_STATE_DICT to keep per-rank checkpoint files
+##     small; HF Trainer + accelerate will gather to a full state dict only when
+##     `trainer.save_model()` is called at the end of each stage.
+
+compute_environment: LOCAL_MACHINE
+debug: false
+distributed_type: FSDP
+downcast_bf16: 'no'
+enable_cpu_affinity: false
+
+fsdp_config:
+  fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
+  fsdp_backward_prefetch: BACKWARD_PRE
+  fsdp_forward_prefetch: false
+  fsdp_cpu_ram_efficient_loading: true
+  fsdp_offload_params: false
+  fsdp_sharding_strategy: FULL_SHARD
+  # IMPORTANT: keep FULL_STATE_DICT here. SHARDED_STATE_DICT writes per-rank
+  # DCP files that AutoModelForCausalLM.from_pretrained() cannot load directly,
+  # which silently breaks `trainer.save_model()` -> downstream stages fail with
+  # 'Couldn't instantiate the backend tokenizer' (because nothing was actually
+  # written to the output dir). FULL_STATE_DICT gathers to rank 0 and saves the
+  # canonical model.safetensors + tokenizer files. 9B/27B fit easily on H200.
+  fsdp_state_dict_type: FULL_STATE_DICT
+  fsdp_sync_module_states: true
+  fsdp_use_orig_params: true
+  fsdp_transformer_layer_cls_to_wrap: Qwen3_5DecoderLayer
+  # NOTE: keep FSDP's activation checkpointing OFF — transformers 5.2 raises
+  # ValueError when both this and TrainingArguments.gradient_checkpointing are
+  # True. The stage yamls already set gradient_checkpointing=true on the trainer
+  # side, which is what we want.
+  fsdp_activation_checkpointing: false
+
+machine_rank: 0
+main_training_function: main
+mixed_precision: bf16
+num_machines: 1
+num_processes: 8
+rdzv_backend: static
+same_network: true
+tpu_use_cluster: false
+tpu_use_sudo: false
+use_cpu: false

@@ -1,0 +1,80 @@
+# MoralSteer OPD — Stage 1 (Curriculum: M(c) < 0.3)
+#
+# H200 NOTE (8x H200 141GB):
+#   - per_device_train_batch_size: 1 -> 2  (or 4 if seq_len <= 1024)
+#   - gradient_accumulation_steps: 8 -> 2
+#   - use_vllm: false -> true (+ uncomment vllm_* lines) — 5-10x rollout speedup
+#   - bf16 + FSDP via `accelerate launch --config_file configs/accelerate_fsdp.yaml`
+#
+# Disk discipline: save_strategy=no means no `checkpoint-N` directories during
+# training; the canonical final weights only land in `output_dir/model.safetensors`
+# via trainer.save_model() at the end. This keeps each stage's footprint to a
+# single copy of the weights.
+
+student_model: ./training/artifacts/sft_warmup
+teacher_model: ./training/artifacts/sft_warmup
+tier1_jsonl: ./training/artifacts/data/pilot5k/tier1.jsonl
+m_max: 0.3
+oversample_l4: 1
+
+output_dir: ./training/artifacts/opd_stage1
+
+# === HF TrainingArguments-style ===
+num_train_epochs: 3
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 1.0e-5
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+logging_steps: 5
+save_strategy: epoch    # per-epoch HF checkpoint; train_two_models.sh prunes checkpoint-N after each stage
+save_total_limit: 1
+bf16: true
+gradient_checkpointing: true
+report_to: ["tensorboard"]
+seed: 17
+
+# === SelfDistillationConfig (generation + rollout) ===
+max_prompt_length: 1024
+max_completion_length: 256
+num_generations: 4
+temperature: 0.7
+top_p: 0.95
+top_k: 0
+# vLLM rollout backend, colocate mode.
+# This works because train_sft_warmup.py / train_opd.py / MoralSteerTrainer all
+# load via AutoModelForImageTextToText -> ckpt keeps Qwen3_5ForConditionalGeneration
+# schema + vision_config, which is what vLLM 0.17's Qwen3.5 implementation expects.
+# Vision tower is frozen at load time (text-only training data).
+# Rollout: transformers backend with manual FSDP.summon_full_params (override in
+# MoralSteerTrainer). We tried vLLM colocate but Qwen3.5 multimodal + FSDP +
+# 4-GPU H200 hit an unsolvable budget conflict:
+#   - low utilization (0.10) -> vLLM can't fit ~16 GB of weights -> bad_alloc on KV pool
+#   - high utilization (0.30) -> vLLM steals from FSDP -> same crash
+# transformers backend is slower but works. ~2-3x rollout latency vs vLLM but
+# avoids the dual-process GPU contention entirely.
+use_vllm: false
+
+# === Distillation loss ===
+full_logit_distillation: false
+distillation_topk: 100
+distillation_alpha: 0.5    # ignored: per-sample alpha(c) takes over
+distillation_is_clip: 5.0
+distillation_weight: 1.0
+loss_type: dapo
+disable_dropout: true
+
+# === MoralSteer-specific ===
+m_alpha_tau: 0.45
+m_alpha_k: 6.0
+m_lambda_beta: 0.8
+m_lambda_tau: 0.55
+m_lambda_k: 6.0
+quality_min_chars: 20
+quality_max_repeat_ratio: 0.35
+
+# === GRPO/online-policy fields not used but required by base config ===
+beta: 0.0           # no ref-KL term
+epsilon: 0.2
+scale_rewards: none
+mask_truncated_completions: false

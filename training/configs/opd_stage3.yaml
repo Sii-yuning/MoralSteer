@@ -1,0 +1,55 @@
+# MoralSteer OPD — Stage 3 (Full curriculum, L4 oversampled).
+# Resume from Stage 2 checkpoint. Teacher remains the SFT warmup checkpoint.
+#
+# H200 NOTE: see configs/opd_stage1.yaml header (same per-device bsz/grad-accum/vLLM tweaks).
+
+student_model: ./training/artifacts/opd_stage2
+teacher_model: ./training/artifacts/sft_warmup
+tier1_jsonl: ./training/artifacts/data/pilot5k/tier1.jsonl
+m_max: null
+oversample_l4: 8
+
+output_dir: ./training/artifacts/opd_stage3
+
+num_train_epochs: 2
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 1.0e-5
+lr_scheduler_type: cosine
+warmup_ratio: 0.05
+logging_steps: 5
+save_strategy: epoch
+save_total_limit: 1
+bf16: true
+gradient_checkpointing: true
+report_to: ["tensorboard"]
+seed: 17
+
+max_prompt_length: 1024
+max_completion_length: 256
+num_generations: 4
+temperature: 0.7
+top_p: 0.95
+top_k: 0
+use_vllm: false  # see opd_stage1.yaml — transformers backend + FSDP summon
+
+full_logit_distillation: false
+distillation_topk: 100
+distillation_alpha: 0.5
+distillation_is_clip: 5.0
+distillation_weight: 1.0
+loss_type: dapo
+disable_dropout: true
+
+m_alpha_tau: 0.45
+m_alpha_k: 6.0
+m_lambda_beta: 0.8
+m_lambda_tau: 0.55
+m_lambda_k: 6.0
+quality_min_chars: 20
+quality_max_repeat_ratio: 0.35
+
+beta: 0.0
+epsilon: 0.2
+scale_rewards: none
+mask_truncated_completions: false
